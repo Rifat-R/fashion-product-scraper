@@ -12,6 +12,7 @@ function App() {
   const [sitesTotal, setSitesTotal] = useState(0);
   const [sitesDone, setSitesDone] = useState(0);
   const [total, setTotal] = useState(0);
+  const [estimatedTotal, setEstimatedTotal] = useState(0);
   const [logs, setLogs] = useState([]);
   const pollRef = useRef(null);
   const scanIdRef = useRef(null);
@@ -41,6 +42,7 @@ function App() {
       setSitesDone(data.sites_done || 0);
       setLogs(data.logs || []);
       setTotal(data.total || 0);
+      setEstimatedTotal(data.estimated_total || 0);
       if (data.status === "complete") {
         stopPolling();
         setLoading(false);
@@ -61,6 +63,7 @@ function App() {
     setError(null);
     setLogs([]);
     setTotal(0);
+    setEstimatedTotal(0);
 
     try {
       const response = await fetch("/api/scan/start", {
@@ -141,6 +144,7 @@ function App() {
         {status ? `Status: ${status}` : ""}
         {sitesTotal ? ` • ${sitesDone}/${sitesTotal} sites scanned` : ""}
         {total ? ` • ${total} products captured` : ""}
+        {estimatedTotal ? ` • ${estimatedTotal} estimated products` : ""}
       </div>
       {error && <div className="error">{error}</div>}
       {logs.length > 0 && (

@@ -12,6 +12,9 @@ SITE_CONFIGS = [
         name="whitefoxboutique",
         base_url="https://www.whitefoxboutique.com",
         search_url="https://www.whitefoxboutique.com/search?q={query}",
+        description_selectors=[
+            "[class*='accordion__description']",
+        ],
     ),
     ScrapeConfig(
         name="american-eagle",
@@ -166,9 +169,7 @@ SITE_CONFIGS = [
             "[class*='stock']",
         ],
         description_selectors=[
-            "[data-qa='product-description']",
-            "[itemprop='description']",
-            "[class*='description']",
+            "[class*='product__description']",
         ],
     ),
     ScrapeConfig(

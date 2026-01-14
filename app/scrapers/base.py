@@ -78,7 +78,7 @@ class SiteScraper:
         if self.log_callback:
             await self.log_callback(message)
 
-    async def search(self, query: str) -> List[dict]:
+    async def search(self, query: str) -> tuple[list[dict], int]:
         search_url = self.config.search_url.format(query=quote_plus(query))
         await self._log(f"{self.config.name}: searching {search_url}")
         page = await self.context.new_page()
@@ -99,7 +99,7 @@ class SiteScraper:
             if product:
                 results.append(product)
         await self._log(f"{self.config.name}: scraped {len(results)} products")
-        return results
+        return results, len(product_urls)
 
     async def _collect_product_urls(self, page: Page) -> List[str]:
         selectors = self.config.product_link_selectors
@@ -341,7 +341,7 @@ class SiteScraper:
 async def run_scan(
     query: str,
     on_site_done: Optional[
-        Callable[[str, List[dict], Optional[Exception]], Awaitable[None]]
+        Callable[[str, List[dict], Optional[Exception], int], Awaitable[None]]
     ] = None,
     on_log: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> List[dict]:
@@ -375,14 +375,17 @@ async def run_scan(
                     scraper = SiteScraper(context, config, log_callback=on_log)
                     site_results: List[dict] = []
                     error: Optional[Exception] = None
+                    estimated_count = 0
                     try:
-                        site_results = await scraper.search(query)
+                        site_results, estimated_count = await scraper.search(query)
                         results.extend(site_results)
                     except Exception as exc:
                         error = exc
                         logger.warning("%s: error %s", config.name, exc)
                     if on_site_done:
-                        await on_site_done(config.name, site_results, error)
+                        await on_site_done(
+                            config.name, site_results, error, estimated_count
+                        )
 
             await asyncio.gather(*(scrape_site(config) for config in SITE_CONFIGS))
             logger.info("scan: finished with %d products", len(results))

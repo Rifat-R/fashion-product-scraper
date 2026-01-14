@@ -20,6 +20,7 @@ class ScanSession:
     logs: List[str] = field(default_factory=list)
     export_path: Optional[str] = None
     exported_count: int = 0
+    estimated_total: int = 0
 
     def add_log(self, message: str) -> None:
         self.logs.append(message)
@@ -61,12 +62,17 @@ class ScanCache:
         entry.add_log(message)
 
     def mark_site_done(
-        self, scan_id: str, site_name: str, error: Optional[Exception]
+        self,
+        scan_id: str,
+        site_name: str,
+        error: Optional[Exception],
+        estimated_count: int = 0,
     ) -> None:
         entry = self._entries.get(scan_id)
         if not entry:
             return
         entry.sites_done += 1
+        entry.estimated_total += estimated_count
         if error:
             entry.add_log(f"{site_name}: failed ({type(error).__name__})")
         else:

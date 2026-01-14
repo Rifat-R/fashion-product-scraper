@@ -37,3 +37,4 @@ class ScanStatusResponse(ScanResponse):
     sites_done: int
     status: str
     logs: List[str]
+    estimated_total: int

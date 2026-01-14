@@ -88,6 +88,7 @@ async def scan_status(
         sites_done=entry.sites_done,
         status=entry.status,
         logs=entry.logs[-50:],
+        estimated_total=entry.estimated_total,
     )
 
 
@@ -107,11 +108,14 @@ async def export_scan(scan_id: str) -> FileResponse:
 
 async def _run_scan_task(scan_id: str, query: str) -> None:
     async def on_site_done(
-        site_name: str, results: List[dict], error: Optional[Exception]
+        site_name: str,
+        results: List[dict],
+        error: Optional[Exception],
+        estimated_count: int,
     ) -> None:
         if results:
             cache.add_results(scan_id, results)
-        cache.mark_site_done(scan_id, site_name, error)
+        cache.mark_site_done(scan_id, site_name, error, estimated_count)
 
     async def on_log(message: str) -> None:
         cache.add_log(scan_id, message)
