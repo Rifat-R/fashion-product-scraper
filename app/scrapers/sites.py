@@ -14,10 +14,15 @@ SITE_CONFIGS = [
         base_url="https://www.whitefoxboutique.com",
         search_url="https://www.whitefoxboutique.com/search?q={query}",
         catalog_url="https://whitefoxboutique.com/collections/new-arrivals",
+        pagination_param="page",
+        pagination_selector="a[aria-label*='next page']",
+        product_link_selectors=[
+            "a.fs-product-main-image-wrapper[href*='/collections/new-arrivals/products/']",
+            "a[href*='/products/']",
+        ],
         description_selectors=[
             "[class*='accordion__description']",
         ],
-        pagination_selector="a[aria-label*='next page']",
     ),
     ScrapeConfig(
         name="american-eagle",
@@ -36,6 +41,9 @@ SITE_CONFIGS = [
         base_url="https://www.freepeople.com",
         search_url="https://www.freepeople.com/search/?q={query}",
         catalog_url="https://www.freepeople.com/uk/whats-new/",
+        product_link_selectors=[
+            "a[href*='/uk/shop']",
+        ],
     ),
     ScrapeConfig(
         name="oldnavy",
@@ -107,12 +115,14 @@ SITE_CONFIGS = [
         base_url="https://wearpact.com",
         search_url="https://wearpact.com/search?q={query}",
         catalog_url="https://wearpact.com/women/new",
+        product_link_selectors=['a[href*="/women/apparel/"]'],
     ),
     ScrapeConfig(
         name="cosstores",
         base_url="https://www.cosstores.com",
         search_url="https://www.cosstores.com/en_usd/search.html?q={query}",
         catalog_url="https://www.cos.com/en-gb/women/view-all",
+        product_link_selectors=['a[href*="/women/womenswear/"]'],
     ),
     # Massimo Dutti doesn't quite work.
     ScrapeConfig(

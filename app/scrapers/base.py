@@ -33,6 +33,8 @@ DEFAULT_HEADERS = {
     "upgrade-insecure-requests": "1",
 }
 
+PRODUCT_PAGE_TIMEOUT_MS = 45000
+
 ADD_TO_CART_SELECTORS = [
     "button:has-text('Add to Cart')",
     "button:has-text('Add to Bag')",
@@ -69,6 +71,19 @@ CATALOG_PATHS = [
     "/products",
 ]
 
+SHOPIFY_PRODUCTS_LIMIT = 250
+TRACKING_QUERY_PARAMS = {
+    "cid",
+    "session",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "gclid",
+    "fbclid",
+}
+
 PAGINATION_SELECTORS = [
     "a[rel='next']",
     "a[aria-label*='Next']",
@@ -77,6 +92,8 @@ PAGINATION_SELECTORS = [
 ]
 
 DEFAULT_PAGINATION_PARAM = "page"
+SCROLL_ATTEMPTS_RANGE = (2, 4)
+SCROLL_PAUSE_SECONDS = 1.2
 
 
 class SiteScraper:
@@ -112,7 +129,13 @@ class SiteScraper:
             await self._log(
                 f"{self.config.name}: scraping product {index}/{self.config.max_products}"
             )
-            product = await self._scrape_product(url)
+            try:
+                product = await self._scrape_product(url)
+            except Exception as exc:
+                await self._log(
+                    f"{self.config.name}: product failed ({type(exc).__name__})"
+                )
+                continue
             if product:
                 results.append(product)
         await self._log(f"{self.config.name}: scraped {len(results)} products")
@@ -135,7 +158,13 @@ class SiteScraper:
             await self._log(
                 f"{self.config.name}: scraping product {index}/{self.config.max_products}"
             )
-            product = await self._scrape_product(url)
+            try:
+                product = await self._scrape_product(url)
+            except Exception as exc:
+                await self._log(
+                    f"{self.config.name}: product failed ({type(exc).__name__})"
+                )
+                continue
             if product:
                 results.append(product)
         await self._log(f"{self.config.name}: scraped {len(results)} products")
@@ -164,6 +193,10 @@ class SiteScraper:
         return None
 
     async def _crawl_catalog_urls(self, start_url: str) -> List[str]:
+        shopify_urls = await self._crawl_shopify_catalog_urls(start_url)
+        if shopify_urls:
+            return shopify_urls
+
         collected: List[str] = []
         seen_products: set[str] = set()
         visited_pages: set[str] = set()
@@ -182,10 +215,12 @@ class SiteScraper:
                 )
                 await self._delay()
                 product_urls = await self._collect_product_urls(page)
+                product_urls = await self._maybe_scroll_for_more(page, product_urls)
                 new_count = 0
                 for url in product_urls:
-                    if url not in seen_products:
-                        seen_products.add(url)
+                    normalized = self._normalize_product_url(url)
+                    if normalized not in seen_products:
+                        seen_products.add(normalized)
                         collected.append(url)
                         new_count += 1
                         if len(collected) >= self.config.max_products:
@@ -241,6 +276,72 @@ class SiteScraper:
         param = self.config.pagination_param or DEFAULT_PAGINATION_PARAM
         return self._with_pagination_param(current_url, param, next_page), None
 
+    async def _crawl_shopify_catalog_urls(self, start_url: str) -> List[str]:
+        if "/collections/" not in start_url:
+            return []
+
+        parsed = urlparse(start_url)
+        path = parsed.path.rstrip("/")
+        if not path:
+            return []
+
+        base = f"{parsed.scheme}://{parsed.netloc}{path}"
+        collected: List[str] = []
+        seen_products: set[str] = set()
+        page_index = 1
+
+        while len(collected) < self.config.max_products:
+            api_url = (
+                f"{base}/products.json?limit={SHOPIFY_PRODUCTS_LIMIT}&page={page_index}"
+            )
+            try:
+                response = await self.context.request.get(api_url, timeout=45000)
+            except Exception:
+                return []
+
+            if response.status >= 400:
+                return []
+
+            try:
+                payload = await response.json()
+            except Exception:
+                return []
+
+            products = payload.get("products") if isinstance(payload, dict) else None
+            if not products:
+                break
+
+            for product in products:
+                handle = product.get("handle") if isinstance(product, dict) else None
+                if not handle:
+                    continue
+                url = urljoin(self.config.base_url, f"/products/{handle}")
+                normalized = self._normalize_product_url(url)
+                if normalized not in seen_products:
+                    seen_products.add(normalized)
+                    collected.append(normalized)
+                if len(collected) >= self.config.max_products:
+                    break
+
+            page_index += 1
+
+        if not collected:
+            return []
+
+        await self._log(
+            f"{self.config.name}: Shopify catalog collected {len(collected)} products"
+        )
+        return collected
+
+    def _normalize_product_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        for key in list(query.keys()):
+            if key in TRACKING_QUERY_PARAMS or key.startswith("utm_"):
+                query.pop(key, None)
+        cleaned = parsed._replace(query=urlencode(query, doseq=True))
+        return urlunparse(cleaned)
+
     def _with_pagination_param(self, url: str, param: str, page: int) -> str:
         parsed = urlparse(url)
         query = parse_qs(parsed.query)
@@ -263,11 +364,35 @@ class SiteScraper:
                     urls.append(absolute)
         return urls
 
+    async def _maybe_scroll_for_more(
+        self, page: Page, product_urls: List[str]
+    ) -> List[str]:
+        attempts = random.randint(*SCROLL_ATTEMPTS_RANGE)
+        best_urls = product_urls
+        for _ in range(attempts):
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(SCROLL_PAUSE_SECONDS)
+            await self._delay()
+            fresh_urls = await self._collect_product_urls(page)
+            if len(fresh_urls) > len(best_urls):
+                best_urls = fresh_urls
+            if len(best_urls) >= self.config.max_products:
+                break
+        return best_urls
+
     async def _scrape_product(self, url: str) -> Optional[dict]:
         page = await self.context.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            await self._delay()
+            try:
+                await page.goto(
+                    url, wait_until="domcontentloaded", timeout=PRODUCT_PAGE_TIMEOUT_MS
+                )
+                await self._delay()
+            except Exception as exc:
+                await self._log(
+                    f"{self.config.name}: product page error ({type(exc).__name__})"
+                )
+                return None
             json_ld = await self._extract_json_ld(page)
             name = await self._first_text(page, self.config.name_selectors)
             if not name:
