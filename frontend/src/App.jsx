@@ -12,7 +12,6 @@ function App() {
   const [sitesTotal, setSitesTotal] = useState(0);
   const [sitesDone, setSitesDone] = useState(0);
   const [total, setTotal] = useState(0);
-  const [estimatedTotal, setEstimatedTotal] = useState(0);
   const [logs, setLogs] = useState([]);
   const pollRef = useRef(null);
   const scanIdRef = useRef(null);
@@ -42,7 +41,6 @@ function App() {
       setSitesDone(data.sites_done || 0);
       setLogs(data.logs || []);
       setTotal(data.total || 0);
-      setEstimatedTotal(data.estimated_total || 0);
       if (data.status === "complete") {
         stopPolling();
         setLoading(false);
@@ -63,7 +61,6 @@ function App() {
     setError(null);
     setLogs([]);
     setTotal(0);
-    setEstimatedTotal(0);
 
     try {
       const response = await fetch("/api/scan/start", {
@@ -109,6 +106,31 @@ function App() {
     }
   };
 
+  const startScanAll = async () => {
+    setLoading(true);
+    setError(null);
+    setLogs([]);
+    setTotal(0);
+
+    try {
+      const response = await fetch("/api/scan/start-all", {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || "Scan failed");
+      }
+      const data = await response.json();
+      setScanId(data.scan_id);
+      setSitesTotal(data.sites_total || 0);
+      setSitesDone(0);
+      setStatus("running");
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     scanIdRef.current = scanId;
   }, [scanId]);
@@ -126,6 +148,9 @@ function App() {
   return (
     <div className="app">
       <h1>Unified Fashion Scanner</h1>
+      <p className="subtitle">
+        Run keyword scans or crawl full catalogs, then export CSV.
+      </p>
       <div className="controls">
         <input
           type="text"
@@ -134,7 +159,10 @@ function App() {
           onChange={(event) => setQuery(event.target.value)}
         />
         <button onClick={startScan} disabled={loading}>
-          {loading ? "Scanning..." : "Scan"}
+          {loading ? "Scanning..." : "Scan Keyword"}
+        </button>
+        <button onClick={startScanAll} disabled={loading}>
+          Scan All Products
         </button>
         <button className="secondary" onClick={downloadCsv} disabled={!scanId}>
           Download CSV
@@ -144,7 +172,6 @@ function App() {
         {status ? `Status: ${status}` : ""}
         {sitesTotal ? ` • ${sitesDone}/${sitesTotal} sites scanned` : ""}
         {total ? ` • ${total} products captured` : ""}
-        {estimatedTotal ? ` • ${estimatedTotal} estimated products` : ""}
       </div>
       {error && <div className="error">{error}</div>}
       {logs.length > 0 && (

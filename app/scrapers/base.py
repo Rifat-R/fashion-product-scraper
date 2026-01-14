@@ -6,7 +6,7 @@ import logging
 import random
 import re
 from typing import Awaitable, Callable, Iterable, List, Optional
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse, urlunparse, urlencode, parse_qs
 
 from playwright.async_api import BrowserContext, Page, async_playwright
 
@@ -61,6 +61,23 @@ DESCRIPTION_BLACKLIST = [
     "shipping",
 ]
 
+CATALOG_PATHS = [
+    "/collections/all",
+    "/collections",
+    "/shop",
+    "/all",
+    "/products",
+]
+
+PAGINATION_SELECTORS = [
+    "a[rel='next']",
+    "a[aria-label*='Next']",
+    "a:has-text('Next')",
+    "button:has-text('Next')",
+]
+
+DEFAULT_PAGINATION_PARAM = "page"
+
 
 class SiteScraper:
     def __init__(
@@ -78,7 +95,7 @@ class SiteScraper:
         if self.log_callback:
             await self.log_callback(message)
 
-    async def search(self, query: str) -> tuple[list[dict], int]:
+    async def search(self, query: str) -> List[dict]:
         search_url = self.config.search_url.format(query=quote_plus(query))
         await self._log(f"{self.config.name}: searching {search_url}")
         page = await self.context.new_page()
@@ -99,7 +116,136 @@ class SiteScraper:
             if product:
                 results.append(product)
         await self._log(f"{self.config.name}: scraped {len(results)} products")
-        return results, len(product_urls)
+        return results
+
+    async def crawl_catalog(self) -> List[dict]:
+        catalog_url = await self._discover_catalog_url()
+        if not catalog_url:
+            await self._log(f"{self.config.name}: catalog not found, skipping")
+            return []
+
+        await self._log(f"{self.config.name}: catalog start {catalog_url}")
+        product_urls = await self._crawl_catalog_urls(catalog_url)
+        await self._log(
+            f"{self.config.name}: collected {len(product_urls)} catalog products"
+        )
+
+        results: List[dict] = []
+        for index, url in enumerate(product_urls[: self.config.max_products], start=1):
+            await self._log(
+                f"{self.config.name}: scraping product {index}/{self.config.max_products}"
+            )
+            product = await self._scrape_product(url)
+            if product:
+                results.append(product)
+        await self._log(f"{self.config.name}: scraped {len(results)} products")
+        return results
+
+    async def _discover_catalog_url(self) -> Optional[str]:
+        if self.config.catalog_url:
+            return self.config.catalog_url
+        candidates = [urljoin(self.config.base_url, path) for path in CATALOG_PATHS]
+        page = await self.context.new_page()
+        try:
+            for candidate in candidates:
+                try:
+                    await page.goto(
+                        candidate, wait_until="domcontentloaded", timeout=60000
+                    )
+                    await self._delay()
+                except Exception:
+                    continue
+                product_urls = await self._collect_product_urls(page)
+                if product_urls:
+                    self.config.catalog_url = candidate
+                    return candidate
+        finally:
+            await page.close()
+        return None
+
+    async def _crawl_catalog_urls(self, start_url: str) -> List[str]:
+        collected: List[str] = []
+        seen_products: set[str] = set()
+        visited_pages: set[str] = set()
+        current_url: Optional[str] = start_url
+        pending_fallback: Optional[str] = None
+        page_index = 1
+
+        while current_url and len(collected) < self.config.max_products:
+            if current_url in visited_pages:
+                break
+            visited_pages.add(current_url)
+            page = await self.context.new_page()
+            try:
+                await page.goto(
+                    current_url, wait_until="domcontentloaded", timeout=60000
+                )
+                await self._delay()
+                product_urls = await self._collect_product_urls(page)
+                new_count = 0
+                for url in product_urls:
+                    if url not in seen_products:
+                        seen_products.add(url)
+                        collected.append(url)
+                        new_count += 1
+                        if len(collected) >= self.config.max_products:
+                            break
+                next_url, fallback_url = await self._find_next_page_url(
+                    page, current_url, page_index + 1
+                )
+            finally:
+                await page.close()
+
+            if not product_urls or new_count == 0:
+                if pending_fallback and pending_fallback not in visited_pages:
+                    current_url = pending_fallback
+                    pending_fallback = None
+                    page_index += 1
+                    continue
+                break
+
+            pending_fallback = None
+            if fallback_url and next_url and fallback_url != next_url:
+                pending_fallback = fallback_url
+
+            if not next_url or next_url in visited_pages:
+                break
+            current_url = next_url
+            page_index += 1
+
+        return collected
+
+    async def _find_next_page_url(
+        self, page: Page, current_url: str, next_page: int
+    ) -> tuple[Optional[str], Optional[str]]:
+        selectors = (
+            [self.config.pagination_selector] if self.config.pagination_selector else []
+        )
+        selectors.extend(PAGINATION_SELECTORS)
+        for selector in selectors:
+            if not selector:
+                continue
+            locator = page.locator(selector)
+            if await locator.count() == 0:
+                continue
+            href = await locator.first.get_attribute("href")
+            if href:
+                next_url = urljoin(self.config.base_url, href)
+                fallback_url = self._with_pagination_param(
+                    current_url,
+                    self.config.pagination_param or DEFAULT_PAGINATION_PARAM,
+                    next_page,
+                )
+                return next_url, fallback_url
+
+        param = self.config.pagination_param or DEFAULT_PAGINATION_PARAM
+        return self._with_pagination_param(current_url, param, next_page), None
+
+    def _with_pagination_param(self, url: str, param: str, page: int) -> str:
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        query[param] = [str(page)]
+        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
     async def _collect_product_urls(self, page: Page) -> List[str]:
         selectors = self.config.product_link_selectors
@@ -341,7 +487,7 @@ class SiteScraper:
 async def run_scan(
     query: str,
     on_site_done: Optional[
-        Callable[[str, List[dict], Optional[Exception], int], Awaitable[None]]
+        Callable[[str, List[dict], Optional[Exception]], Awaitable[None]]
     ] = None,
     on_log: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> List[dict]:
@@ -375,22 +521,74 @@ async def run_scan(
                     scraper = SiteScraper(context, config, log_callback=on_log)
                     site_results: List[dict] = []
                     error: Optional[Exception] = None
-                    estimated_count = 0
                     try:
-                        site_results, estimated_count = await scraper.search(query)
+                        site_results = await scraper.search(query)
                         results.extend(site_results)
                     except Exception as exc:
                         error = exc
                         logger.warning("%s: error %s", config.name, exc)
                     if on_site_done:
-                        await on_site_done(
-                            config.name, site_results, error, estimated_count
-                        )
+                        await on_site_done(config.name, site_results, error)
 
             await asyncio.gather(*(scrape_site(config) for config in SITE_CONFIGS))
             logger.info("scan: finished with %d products", len(results))
             if on_log:
                 await on_log(f"scan: finished with {len(results)} products")
+            return results
+        finally:
+            await browser.close()
+
+
+async def run_scan_all(
+    on_site_done: Optional[
+        Callable[[str, List[dict], Optional[Exception]], Awaitable[None]]
+    ] = None,
+    on_log: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> List[dict]:
+    logger.info("scan-all: starting")
+    if on_log:
+        await on_log("scan-all: starting")
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True)
+        try:
+            context = await browser.new_context(
+                user_agent=random.choice(USER_AGENTS),
+                viewport={"width": 1365, "height": 768},
+                locale="en-US",
+                timezone_id="America/New_York",
+                extra_http_headers=DEFAULT_HEADERS,
+            )
+            await context.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                """
+            )
+
+            semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+            results: List[dict] = []
+
+            async def scrape_site(config: ScrapeConfig) -> None:
+                async with semaphore:
+                    scraper = SiteScraper(context, config, log_callback=on_log)
+                    site_results: List[dict] = []
+                    error: Optional[Exception] = None
+                    try:
+                        site_results = await scraper.crawl_catalog()
+                        if site_results:
+                            results.extend(site_results)
+                    except Exception as exc:
+                        error = exc
+                        logger.warning("%s: error %s", config.name, exc)
+                    if on_site_done:
+                        await on_site_done(config.name, site_results, error)
+
+            await asyncio.gather(*(scrape_site(config) for config in SITE_CONFIGS))
+            logger.info("scan-all: finished with %d products", len(results))
+            if on_log:
+                await on_log(f"scan-all: finished with {len(results)} products")
             return results
         finally:
             await browser.close()

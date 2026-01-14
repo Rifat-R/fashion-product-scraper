@@ -63,4 +63,7 @@ class ScrapeConfig:
     description_selectors: List[str] = field(
         default_factory=lambda: DEFAULT_DESCRIPTION_SELECTORS
     )
-    max_products: int = 100
+    catalog_url: str | None = None
+    pagination_selector: str | None = None
+    pagination_param: str | None = None
+    max_products: int = 75

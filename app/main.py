@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.cache import ScanCache, decode_cursor, encode_cursor
 from app.models import ScanRequest, ScanResponse, ScanStartResponse, ScanStatusResponse
-from app.scrapers.base import run_scan
+from app.scrapers.base import run_scan, run_scan_all
 from app.scrapers.sites import SITE_CONFIGS
 
 logging.basicConfig(
@@ -64,6 +64,17 @@ async def start_scan(request: ScanRequest) -> ScanStartResponse:
     return ScanStartResponse(scan_id=scan_id, sites_total=len(SITE_CONFIGS))
 
 
+@app.post("/api/scan/start-all", response_model=ScanStartResponse)
+async def start_scan_all() -> ScanStartResponse:
+    scan_id = cache.create("*", len(SITE_CONFIGS))
+    entry = cache.get(scan_id)
+    if entry:
+        entry.add_log("scan-all: started")
+    logging.getLogger("scraper").info("scan-all %s: started", scan_id)
+    asyncio.create_task(_run_scan_all_task(scan_id))
+    return ScanStartResponse(scan_id=scan_id, sites_total=len(SITE_CONFIGS))
+
+
 @app.get("/api/scan/status", response_model=ScanStatusResponse)
 async def scan_status(
     scan_id: str, page_size: int = 20, cursor: Optional[str] = None
@@ -88,7 +99,6 @@ async def scan_status(
         sites_done=entry.sites_done,
         status=entry.status,
         logs=entry.logs[-50:],
-        estimated_total=entry.estimated_total,
     )
 
 
@@ -111,11 +121,10 @@ async def _run_scan_task(scan_id: str, query: str) -> None:
         site_name: str,
         results: List[dict],
         error: Optional[Exception],
-        estimated_count: int,
     ) -> None:
         if results:
             cache.add_results(scan_id, results)
-        cache.mark_site_done(scan_id, site_name, error, estimated_count)
+        cache.mark_site_done(scan_id, site_name, error)
 
     async def on_log(message: str) -> None:
         cache.add_log(scan_id, message)
@@ -123,6 +132,24 @@ async def _run_scan_task(scan_id: str, query: str) -> None:
     await run_scan(query, on_site_done=on_site_done, on_log=on_log)
     cache.mark_complete(scan_id)
     logging.getLogger("scraper").info("scan %s: complete", scan_id)
+
+
+async def _run_scan_all_task(scan_id: str) -> None:
+    async def on_site_done(
+        site_name: str,
+        results: List[dict],
+        error: Optional[Exception],
+    ) -> None:
+        if results:
+            cache.add_results(scan_id, results)
+        cache.mark_site_done(scan_id, site_name, error)
+
+    async def on_log(message: str) -> None:
+        cache.add_log(scan_id, message)
+
+    await run_scan_all(on_site_done=on_site_done, on_log=on_log)
+    cache.mark_complete(scan_id)
+    logging.getLogger("scraper").info("scan-all %s: complete", scan_id)
 
 
 def _decode_cursor(cursor: str) -> Tuple[str, int]:

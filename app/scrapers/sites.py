@@ -7,20 +7,25 @@ SITE_CONFIGS = [
         name="princesspolly",
         base_url="https://www.princesspolly.com",
         search_url="https://www.princesspolly.com/search?q={query}",
+        catalog_url="https://princesspolly.co.uk/collections/new?sortOrder=newest",
     ),
     ScrapeConfig(
         name="whitefoxboutique",
         base_url="https://www.whitefoxboutique.com",
         search_url="https://www.whitefoxboutique.com/search?q={query}",
+        catalog_url="https://whitefoxboutique.com/collections/new-arrivals",
         description_selectors=[
             "[class*='accordion__description']",
         ],
+        pagination_selector="a[aria-label*='next page']",
     ),
     ScrapeConfig(
         name="american-eagle",
         base_url="https://www.ae.com",
         search_url="https://www.ae.com/us/en/search?query={query}",
+        catalog_url="https://www.ae.com/us/en/c/women/womens",
     ),
+    # Has bot protection
     ScrapeConfig(
         name="aerie",
         base_url="https://www.aerie.com",
@@ -30,6 +35,7 @@ SITE_CONFIGS = [
         name="freepeople",
         base_url="https://www.freepeople.com",
         search_url="https://www.freepeople.com/search/?q={query}",
+        catalog_url="https://www.freepeople.com/uk/whats-new/",
     ),
     ScrapeConfig(
         name="oldnavy",
@@ -40,11 +46,13 @@ SITE_CONFIGS = [
         name="pacsun",
         base_url="https://www.pacsun.com",
         search_url="https://www.pacsun.com/search?q={query}",
+        catalog_url="https://www.pacsun.com/womens/",
     ),
     ScrapeConfig(
         name="reformation",
         base_url="https://www.thereformation.com",
         search_url="https://www.thereformation.com/search?q={query}",
+        catalog_url="https://www.thereformation.com/new",
         name_selectors=[
             "h1[itemprop='name']",
             "[data-qa='pdp-product-name']",
@@ -76,6 +84,7 @@ SITE_CONFIGS = [
             "[class*='description']",
         ],
     ),
+    # Has bot protection
     ScrapeConfig(
         name="revolve",
         base_url="https://www.revolve.com",
@@ -83,9 +92,11 @@ SITE_CONFIGS = [
     ),
     ScrapeConfig(
         name="sisterhoods",
-        base_url="https://www.sisterhoods.com",
-        search_url="https://www.sisterhoods.com/search?q={query}",
+        base_url="https://join-the-sisterhood.com",
+        search_url="https://join-the-sisterhood.com/search?q={query}",
+        catalog_url="https://join-the-sisterhood.com/collections/all",
     ),
+    # This URL doesn't work
     ScrapeConfig(
         name="wearenotbasics",
         base_url="https://www.wearenotbasics.com",
@@ -95,12 +106,15 @@ SITE_CONFIGS = [
         name="wearpact",
         base_url="https://wearpact.com",
         search_url="https://wearpact.com/search?q={query}",
+        catalog_url="https://wearpact.com/women/new",
     ),
     ScrapeConfig(
         name="cosstores",
         base_url="https://www.cosstores.com",
         search_url="https://www.cosstores.com/en_usd/search.html?q={query}",
+        catalog_url="https://www.cos.com/en-gb/women/view-all",
     ),
+    # Massimo Dutti doesn't quite work.
     ScrapeConfig(
         name="massimodutti",
         base_url="https://www.massimodutti.com",
@@ -110,6 +124,7 @@ SITE_CONFIGS = [
         name="nobodyschild",
         base_url="https://www.nobodyschild.com",
         search_url="https://www.nobodyschild.com/search?q={query}",
+        catalog_url="https://www.nobodyschild.com/collections/new-in",
         name_selectors=[
             "h1[itemprop='name']",
             "[data-qa='product-title']",
@@ -176,11 +191,13 @@ SITE_CONFIGS = [
         name="boody",
         base_url="https://www.boody.com",
         search_url="https://www.boody.com/search?q={query}",
+        catalog_url="https://boody.com/collections/womens-clothing",
     ),
     ScrapeConfig(
         name="bambooclothing",
         base_url="https://www.bambooclothing.co.uk",
         search_url="https://www.bambooclothing.co.uk/search?query={query}",
+        catalog_url="https://bambooclothing.co.uk/category/new-in-womens/",
     ),
     ScrapeConfig(
         name="theset",
