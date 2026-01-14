@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zain Scraper</title>
+  <style>
+    body {
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 32px;
+      background: #f7f7fb;
+      color: #1f2937;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    }
+    h1 {
+      margin-top: 0;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    input, button {
+      font-size: 15px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #0f766e;
+    }
+    button:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 12px;
+      font-size: 14px;
+      color: #6b7280;
+    }
+    .logs {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 12px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      font-size: 13px;
+      color: #374151;
+      max-height: 320px;
+      overflow: auto;
+    }
+    .logs ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+    .error {
+      margin-top: 12px;
+      color: #dc2626;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Unified Fashion Scanner</h1>
+    <div id="root"></div>
+  </div>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useEffect, useRef, useState } = React;
+
+    function App() {
+      const [query, setQuery] = useState("");
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [scanId, setScanId] = useState(null);
+      const [status, setStatus] = useState(null);
+      const [sitesTotal, setSitesTotal] = useState(0);
+      const [sitesDone, setSitesDone] = useState(0);
+      const [total, setTotal] = useState(0);
+      const [logs, setLogs] = useState([]);
+      const pollRef = useRef(null);
+
+      const stopPolling = () => {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      };
+
+      const fetchStatus = async () => {
+        if (!scanId) return;
+        const url = new URL("/api/scan/status", window.location.origin);
+        url.searchParams.set("scan_id", scanId);
+
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || "Status failed");
+          }
+          const data = await response.json();
+          setStatus(data.status || null);
+          setSitesTotal(data.sites_total || 0);
+          setSitesDone(data.sites_done || 0);
+          setLogs(data.logs || []);
+          setTotal(data.total || 0);
+          if (data.status === "complete") {
+            stopPolling();
+            setLoading(false);
+          }
+        } catch (err) {
+          setError(err.message);
+          stopPolling();
+          setLoading(false);
+        }
+      };
+
+      const startScan = async () => {
+        if (!query.trim()) {
+          setError("Enter a product keyword to scan.");
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        setLogs([]);
+        setTotal(0);
+
+        try {
+          const response = await fetch("/api/scan/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: query.trim() }),
+          });
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || "Scan failed");
+          }
+          const data = await response.json();
+          setScanId(data.scan_id);
+          setSitesTotal(data.sites_total || 0);
+          setSitesDone(0);
+          setStatus("running");
+          stopPolling();
+          pollRef.current = setInterval(() => fetchStatus(), 2000);
+          await fetchStatus();
+        } catch (err) {
+          setError(err.message);
+          setLoading(false);
+        }
+      };
+
+      const downloadCsv = async () => {
+        if (!scanId) return;
+        try {
+          const response = await fetch(`/api/scan/export?scan_id=${scanId}`);
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || "Export failed");
+          }
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          const filename = `scan_${scanId}.csv`;
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.URL.revokeObjectURL(url);
+        } catch (err) {
+          setError(err.message);
+        }
+      };
+
+      useEffect(() => () => stopPolling(), []);
+
+      return (
+        <div>
+          <div className="controls">
+            <input
+              type="text"
+              placeholder="Search keyword (e.g. linen dress)"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <button onClick={startScan} disabled={loading}>
+              {loading ? "Scanning..." : "Scan"}
+            </button>
+            <button
+              className="secondary"
+              onClick={downloadCsv}
+              disabled={!scanId}
+            >
+              Download CSV
+            </button>
+          </div>
+          <div className="status">
+            {status ? `Status: ${status}` : ""}
+            {sitesTotal ? ` • ${sitesDone}/${sitesTotal} sites scanned` : ""}
+            {total ? ` • ${total} products captured` : ""}
+          </div>
+          {error && <div className="error">{error}</div>}
+          {logs.length > 0 && (
+            <div className="logs">
+              <strong>Scan log</strong>
+              <ul>
+                {logs.map((entry, index) => (
+                  <li key={`${entry}-${index}`}>{entry}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
